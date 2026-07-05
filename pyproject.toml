@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modelgenius-sdk"
+version = "0.1.0"
+description = "Capture LLM call/response snapshots and validate them against the ModelGenius snapshot format — locally, with no network calls."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "ModelGenius" }]
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "jsonschema>=4.18",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/ClassGenius/modelgenius-sdk"
+Documentation = "https://github.com/ClassGenius/modelgenius-sdk/blob/main/docs/snapshot_format.md"
+
+[project.scripts]
+modelgenius-sdk = "modelgenius_sdk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"modelgenius_sdk.schema" = ["*.json"]
+modelgenius_sdk = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["UP007", "UP045"]  # keep Optional/Union spellings for py39 runtime introspection safety
