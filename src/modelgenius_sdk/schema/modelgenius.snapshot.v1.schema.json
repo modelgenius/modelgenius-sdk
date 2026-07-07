@@ -231,7 +231,7 @@
       "type": "object"
     }
   },
-  "$id": "https://raw.githubusercontent.com/ClassGenius/modelgenius-sdk/main/src/modelgenius_sdk/schema/modelgenius.snapshot.v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/modelgenius/modelgenius-sdk/main/src/modelgenius_sdk/schema/modelgenius.snapshot.v1.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "A captured LLM request/response snapshot in the canonical (OpenAI-chat-shaped) ModelGenius upload format. Anthropic Messages-API-shaped records are also accepted at upload time and converted server-side; this schema describes the canonical shape. Unknown top-level fields are permitted and preserved-or-ignored, so v1 evolves additively.",
   "properties": {

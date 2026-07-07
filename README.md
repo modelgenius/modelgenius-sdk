@@ -1,6 +1,6 @@
 # modelgenius-sdk
 
-[![CI](https://github.com/ClassGenius/modelgenius-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/ClassGenius/modelgenius-sdk/actions/workflows/ci.yml)
+[![CI](https://github.com/modelgenius/modelgenius-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/modelgenius/modelgenius-sdk/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/modelgenius-sdk.svg)](https://pypi.org/project/modelgenius-sdk/)
 [![Python](https://img.shields.io/pypi/pyversions/modelgenius-sdk.svg)](https://pypi.org/project/modelgenius-sdk/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -9,7 +9,7 @@ Capture your production LLM calls as local **snapshot** files, and validate
 them against the ModelGenius snapshot format — entirely on your machine, with
 **zero network calls and zero telemetry**.
 
-[ModelGenius](https://github.com/ClassGenius) answers "is it safe to switch
+[ModelGenius](https://github.com/modelgenius) answers "is it safe to switch
 LLM models, and is it worth it?" by replaying your real production requests
 against candidate models and comparing quality, cost, and latency. The input
 to that analysis is a set of snapshots: your requests, the parameters they

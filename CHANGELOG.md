@@ -30,4 +30,4 @@ Initial public release.
   (`docs/snapshot_format.md`).
 - Validated example snapshot files under `examples/`.
 
-[0.1.0]: https://github.com/ClassGenius/modelgenius-sdk/releases/tag/v0.1.0
+[0.1.0]: https://github.com/modelgenius/modelgenius-sdk/releases/tag/v0.1.0

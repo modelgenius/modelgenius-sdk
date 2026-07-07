@@ -6,7 +6,7 @@ please keep it that way.
 ## Development setup
 
 ```bash
-git clone https://github.com/ClassGenius/modelgenius-sdk
+git clone https://github.com/modelgenius/modelgenius-sdk
 cd modelgenius-sdk
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"

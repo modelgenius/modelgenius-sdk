@@ -42,7 +42,7 @@ may include end-user content or PII. Recommendations:
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately via
-[GitHub Security Advisories](https://github.com/ClassGenius/modelgenius-sdk/security/advisories/new)
+[GitHub Security Advisories](https://github.com/modelgenius/modelgenius-sdk/security/advisories/new)
 ("Report a vulnerability" on the repository's Security tab). Do **not** open
 a public issue for security reports.
 
