@@ -18,7 +18,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: ruff check src tests
+      - run: ruff check src tests scripts
       - run: pytest -q
       - name: Validate bundled examples
         run: modelgenius-sdk validate examples/
+
+  license-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Plain (non-dev) install: audit exactly what a customer's pip resolves.
+      - run: pip install .
+      - run: python scripts/license_audit.py --check
