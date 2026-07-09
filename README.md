@@ -18,13 +18,24 @@ This SDK is the capture side. It has one runtime dependency (`jsonschema`)
 and never imports `openai`, `anthropic`, or `litellm` — it duck-types your
 existing client objects.
 
-Two ways to adopt it:
+Three ways to adopt it:
 
 1. **Wrap your client** — one line at startup; every call is spooled to local
    JSONL as it happens, with real outputs, token usage, and latency attached.
 2. **Bring your own logs** — if you already log LLM traffic, write it in the
    [snapshot format](docs/snapshot_format.md) and use `modelgenius-sdk
    validate` to check it before uploading.
+3. **Bring your OpenTelemetry traces** — if your app is already instrumented
+   with the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)
+   (OpenLLMetry, OpenLIT, vendor SDKs, …), convert an OTLP/JSON export with
+   `modelgenius-sdk convert otlp` — no app changes needed. Requires message
+   content capture to be enabled in your instrumentation (it is off by
+   default in OTel; metadata-only spans convert to an actionable error).
+   Legacy flattened OpenLLMetry attributes (`gen_ai.prompt.N.*`) are also
+   understood. Two gaps are inherent to the conventions and flagged rather
+   than guessed: `response_format` JSON schemas and (often) tool definitions
+   are not carried in traces — converted records note `enrichment_needed` in
+   metadata and the validator reminds you to supply them at upload.
 
 ## Install
 
@@ -175,6 +186,7 @@ ModelGenius upload step) at the directory when you are ready.
 
 ```bash
 modelgenius-sdk validate PATH [--json] [--strict] [--quiet]
+modelgenius-sdk convert otlp PATH [-o OUTPUT.jsonl] [--json] [--quiet]
 modelgenius-sdk version
 ```
 
@@ -183,6 +195,12 @@ directory of both. Exit code 0 means every record is accepted by the same
 semantics as the ModelGenius upload path; warnings point out optional fields
 that would unlock capability. `--strict` turns warnings into failures (useful
 in CI — this repo validates its own `examples/` on every push).
+
+`convert otlp` converts an OTLP/JSON trace export (a `.json` payload or a
+collector file-exporter `.jsonl`) into snapshot JSONL and validates the
+result in one step. Exit code 0 means every GenAI span converted and
+validated; per-span problems (e.g. content capture disabled in your
+instrumentation) are reported individually and exit 1.
 
 ## Limitations (v0)
 

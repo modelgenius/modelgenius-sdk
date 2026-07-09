@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `modelgenius-sdk convert otlp PATH [-o OUTPUT.jsonl]` — convert OTLP/JSON
+  trace exports following the OpenTelemetry GenAI semantic conventions into
+  snapshot JSONL, then validate the result. Reads message content from span
+  attributes, the `gen_ai.client.inference.operation.details` event, or
+  legacy flattened OpenLLMetry attributes; metadata-only spans (content
+  capture disabled) produce actionable per-span errors.
+- `modelgenius_sdk.convert` — `convert_otlp_file()` / `convert_otlp_payload()`
+  / `is_otlp_traces()` public API (pure stdlib, local-only).
+- Validator warnings `needs_response_format_schema` and
+  `needs_tool_definitions` for imported records whose trace format could not
+  carry the response-format JSON schema or tool definitions
+  (`metadata.enrichment_needed`).
+
 ## [0.1.0] - 2026-07-05
 
 Initial public release.

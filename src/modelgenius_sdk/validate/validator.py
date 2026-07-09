@@ -73,6 +73,15 @@ _WARNING_TEMPLATES = {
         "{n} record(s) have empty messages — there is nothing to replay or "
         "evaluate for these records."
     ),
+    "needs_response_format_schema": (
+        "{n} record(s) were imported without their response_format JSON schema "
+        "(OTel traces cannot represent it) — supply the schema at upload to "
+        "restore schema/contract checks and faithful structured-output replay."
+    ),
+    "needs_tool_definitions": (
+        "{n} record(s) contain tool calls but no tool definitions — these "
+        "cannot be replayed until the definitions are supplied."
+    ),
 }
 
 
@@ -572,6 +581,13 @@ def _record_warnings(record: dict, make: Callable[[str, str, str], Issue]) -> li
 
     if record.get("messages") == []:
         warn("empty_messages")
+
+    enrichment = metadata.get("enrichment_needed")
+    if isinstance(enrichment, list):
+        if "response_format_schema" in enrichment:
+            warn("needs_response_format_schema")
+        if "tool_definitions" in enrichment:
+            warn("needs_tool_definitions")
 
     return out
 
