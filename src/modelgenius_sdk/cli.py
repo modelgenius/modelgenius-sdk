@@ -37,7 +37,7 @@ def _resolve_version() -> str:
 
         return version("modelgenius-sdk")
     except Exception:
-        return "0.1.0"
+        return "0.2.0"
 
 
 def _build_parser() -> argparse.ArgumentParser:
