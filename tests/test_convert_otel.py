@@ -112,9 +112,9 @@ class TestConvertCli:
         assert "response_format JSON schema" in captured
         assert "tool calls but no tool definitions" in captured
 
-        lines = [json.loads(l) for l in out.read_text().splitlines()]
+        lines = [json.loads(line) for line in out.read_text().splitlines()]
         assert len(lines) == 6
-        assert all(l["format"] == "modelgenius.snapshot/v1" for l in lines)
+        assert all(line["format"] == "modelgenius.snapshot/v1" for line in lines)
 
     def test_convert_clean_file_exits_zero(self, tmp_path, capsys):
         payload = json.loads(FIXTURE.read_text())
