@@ -27,15 +27,19 @@ Three ways to adopt it:
    validate` to check it before uploading.
 3. **Bring your OpenTelemetry traces** — if your app is already instrumented
    with the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)
-   (OpenLLMetry, OpenLIT, vendor SDKs, …), convert an OTLP/JSON export with
-   `modelgenius-sdk convert otlp` — no app changes needed. Requires message
-   content capture to be enabled in your instrumentation (it is off by
-   default in OTel; metadata-only spans convert to an actionable error).
-   Legacy flattened OpenLLMetry attributes (`gen_ai.prompt.N.*`) are also
-   understood. Two gaps are inherent to the conventions and flagged rather
-   than guessed: `response_format` JSON schemas and (often) tool definitions
-   are not carried in traces — converted records note `enrichment_needed` in
-   metadata and the validator reminds you to supply them at upload.
+   (tested with Traceloop/OpenLLMetry, the official
+   `opentelemetry-instrumentation-*` packages, and Claude SDK and Claude API
+   tracing), convert an OTLP/JSON export with `modelgenius-sdk convert otlp`
+   — no app changes needed. Requires message content capture to be enabled
+   in your instrumentation (it is off by default in OTel; metadata-only spans
+   convert to an actionable error). Legacy flattened OpenLLMetry attributes
+   (`gen_ai.prompt.N.*`) are also understood; OpenInference (Arize Phoenix)
+   spans are not yet, and are reported as such. Two gaps are inherent to the
+   conventions and flagged rather than guessed: `response_format` JSON
+   schemas (Traceloop records them, and they are used) and often tool
+   definitions are not carried in traces — converted records note
+   `enrichment_needed` in metadata and the validator reminds you to supply
+   them at upload.
 
 ## Install
 
@@ -196,11 +200,14 @@ semantics as the ModelGenius upload path; warnings point out optional fields
 that would unlock capability. `--strict` turns warnings into failures (useful
 in CI — this repo validates its own `examples/` on every push).
 
-`convert otlp` converts an OTLP/JSON trace export (a `.json` payload or a
-collector file-exporter `.jsonl`) into snapshot JSONL and validates the
-result in one step. Exit code 0 means every GenAI span converted and
-validated; per-span problems (e.g. content capture disabled in your
-instrumentation) are reported individually and exit 1.
+`convert otlp` converts an OTLP/JSON trace export (a `.json` payload, or a
+collector file export with one payload per line, named `.jsonl` or `.json`)
+into snapshot JSONL and validates the result in one step. When one call was
+traced twice (say the Claude SDK's span and the Claude API's, or the same span
+delivered twice), the copies become one record. Exit code 0 means every GenAI
+span converted and validated; per-span problems (e.g. content capture
+disabled in your instrumentation) are reported individually and exit 1.
+Binary (protobuf) exports are not read; use the collector's `format: json`.
 
 ## Limitations (v0)
 

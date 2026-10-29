@@ -176,6 +176,9 @@ def _cmd_convert_otlp(args: argparse.Namespace) -> int:
             "converted": result.converted,
             "skipped_non_genai": result.skipped_non_genai,
             "skipped_non_inference": result.skipped_non_inference,
+            "skipped_duplicate": result.skipped_duplicate,
+            "no_content": result.no_content,
+            "unsupported_openinference": result.unsupported_openinference,
             "conversion_errors": result.errors,
             "validation": (
                 {
@@ -200,6 +203,8 @@ def _cmd_convert_otlp(args: argparse.Namespace) -> int:
             skipped_bits.append(f"{result.skipped_non_genai} non-GenAI span(s)")
         if result.skipped_non_inference:
             skipped_bits.append(f"{result.skipped_non_inference} non-inference GenAI span(s)")
+        if result.skipped_duplicate:
+            skipped_bits.append(f"{result.skipped_duplicate} duplicate span(s) of calls already converted")
         skipped_note = f" (skipped {', '.join(skipped_bits)})" if skipped_bits else ""
         print(
             f"Converted: {result.converted} snapshot(s), "

@@ -18,26 +18,41 @@ What maps where (OTel → snapshot record):
     gen_ai.request.{seed,top_k}               → provider_params (captured, not auto-replayed)
     gen_ai.usage.*                            → captured_output.usage
     span start/end times                      → timestamp, captured_output timestamps, latency_ms
-    gen_ai.tool.definitions                   → tools (OpenAI function wrappers)
-    gen_ai.prompt.name                        → workflow_id
-    trace/span/conversation ids, provider, …  → metadata["otel"]
+    gen_ai.tool.definitions                   → tools (OpenAI function wrappers;
+                                                ``parameters`` or Anthropic ``input_schema``)
+    gen_ai.request.structured_output_schema   → response_format (json_schema; Traceloop)
+    gen_ai.prompt.name, else traceloop.workflow.name → workflow_id
+    traceloop.entity.path                     → metadata["call_name"] (with a workflow)
+    trace/span/conversation/response ids, …   → metadata["otel"]
 
 Message content is read, in order of preference, from: span attributes; the
 ``gen_ai.client.inference.operation.details`` span event; legacy flattened
 OpenLLMetry-style attributes (``gen_ai.prompt.{i}.role/.content``,
 ``gen_ai.completion.0.*``).
 
+One call is often traced twice: the Claude SDK's client span and the Claude
+API's server span, or a Traceloop span plus the SDK's own span inside it.
+Records that share a ``gen_ai.response.id`` are merged into the most complete
+copy (``skipped_duplicate``); a content-less copy of a converted call is
+dropped silently. ``convert_otlp_payloads`` applies this across several
+payloads (for example every line of one collector file).
+
 Known gaps in the conventions are detected and surfaced, never fabricated:
 
-* ``response_format`` JSON schemas are not representable in OTel
-  (``gen_ai.output.type`` is a modality hint only). When ``output.type`` is
-  ``json`` the record gets ``metadata["enrichment_needed"]`` containing
-  ``"response_format_schema"`` so downstream UIs can ask for the real schema.
+* ``response_format`` JSON schemas are not representable in the conventions
+  (``gen_ai.output.type`` is a modality hint only). Traceloop's
+  ``gen_ai.request.structured_output_schema`` is used when present;
+  otherwise, when ``output.type`` is ``json``, the record gets
+  ``metadata["enrichment_needed"]`` containing ``"response_format_schema"``
+  so downstream UIs can ask for the real schema.
 * ``tool_choice`` does not exist in the conventions at all.
 * Tool *calls* without tool *definitions* (definitions are opt-in and often
   omitted) yield ``"tool_definitions"`` in ``metadata["enrichment_needed"]``.
-* Message content capture is opt-in in OTel instrumentations; a GenAI span
-  with no content converts to a per-span error explaining how to enable it.
+* Message content capture is opt-in in OTel instrumentations; an inference
+  span with no content converts to a per-span error explaining how to enable
+  it (``no_content``).
+* OpenInference (Arize Phoenix) spans use a different attribute scheme that
+  is not converted; they are counted and reported in one error.
 """
 
 from __future__ import annotations
@@ -55,6 +70,17 @@ FORMAT_TAG = "modelgenius.snapshot/v1"
 # invoke_agent, create_agent, retrieve) are structural/agentic spans — counted
 # and skipped, never errors.
 INFERENCE_OPERATIONS = frozenset({"chat", "text_completion", "generate_content"})
+
+# Legacy OpenLLMetry ``llm.request.type`` values for an inference call (spans
+# from before ``gen_ai.operation.name`` existed).
+_LEGACY_INFERENCE_REQUEST_TYPES = frozenset({"chat", "completion"})
+
+# Provider spans that are never a whole inference call: one model attempt
+# inside a Claude API request or Managed Agents turn. Their content, if any,
+# is on the parent (``anthropic.messages.create`` / ``anthropic.session.turn``).
+_STRUCTURAL_SPAN_NAMES = frozenset({"anthropic.model_request"})
+
+_SPAN_KINDS = {1: "internal", 2: "server", 3: "client", 4: "producer", 5: "consumer"}
 
 # Roles seen in the wild that must fold onto the canonical four.
 _ROLE_ALIASES = {"model": "assistant", "ai": "assistant", "human": "user"}
@@ -97,6 +123,7 @@ _CONSUMED_ATTRS = frozenset(
         "gen_ai.prompt.name",
         "gen_ai.prompt.version",
         "gen_ai.output.type",
+        "gen_ai.request.structured_output_schema",
         "llm.request.type",
     }
 )
@@ -104,22 +131,43 @@ _CONSUMED_ATTRS = frozenset(
 _GENAI_ATTR_PREFIXES = ("gen_ai.", "llm.", "openai.", "anthropic.", "aws.bedrock.")
 
 _CONTENT_CAPTURE_HINT = (
-    "Enable message-content capture in your OTel instrumentation (for many "
-    "SDKs: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true, or your "
-    "vendor's equivalent content-capture option) and re-export the traces, "
-    "or capture with the modelgenius-sdk client wrappers, which record full "
-    "requests by default."
+    "Turn on message-content capture where the traces are produced, then "
+    "re-export. Official OpenTelemetry GenAI instrumentations: "
+    "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=span_only (or "
+    "span_and_event; current releases ignore =true, and event_only puts the "
+    "content in the logs signal, which is not read). Traceloop/OpenLLMetry: "
+    "TRACELOOP_TRACE_CONTENT=true, with content on span attributes (the "
+    "default). Claude API tracing: the Console destination's content mode "
+    "'Full content'; Claude SDK tracing: content_mode 'content'. Or capture "
+    "with the modelgenius-sdk client wrappers, which record full requests by "
+    "default."
 )
+
+_OPENINFERENCE_HINT = (
+    "OpenInference (Arize Phoenix) LLM span(s) found. That attribute format "
+    "is not supported yet, so they were not converted. Export with an "
+    "OpenTelemetry GenAI instrumentation (Traceloop/OpenLLMetry or the "
+    "official opentelemetry-instrumentation-* packages) instead."
+)
+
+# Response format name used when only the schema was traced.
+_STRUCTURED_OUTPUT_NAME = "structured_output"
 
 
 @dataclass
 class OtlpConversionResult:
-    """Outcome of converting one OTLP/JSON payload."""
+    """Outcome of converting one or more OTLP/JSON payloads."""
 
     records: list[dict] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     skipped_non_genai: int = 0
     skipped_non_inference: int = 0
+    # Copies of a call already converted (same gen_ai.response.id).
+    skipped_duplicate: int = 0
+    # Inference spans without message content (each also has an error).
+    no_content: int = 0
+    # OpenInference LLM spans (one error covers them all).
+    unsupported_openinference: int = 0
 
     @property
     def converted(self) -> int:
@@ -136,27 +184,139 @@ def is_otlp_traces(raw: Any) -> bool:
 
 def convert_otlp_payload(raw: dict) -> OtlpConversionResult:
     """Convert one OTLP/JSON payload (an ExportTraceServiceRequest) to records."""
+    return convert_otlp_payloads([raw])
+
+
+def convert_otlp_payloads(
+    payloads: list[dict],
+    labels: list[str] | None = None,
+) -> OtlpConversionResult:
+    """Convert several OTLP/JSON payloads as one set of traces.
+
+    Duplicate copies of one call are merged across all of them, so pass every
+    payload of one export (e.g. each line of a collector file) together.
+    ``labels`` (one per payload) prefix that payload's error messages.
+    """
     result = OtlpConversionResult()
-    resource_spans = raw.get("resourceSpans", raw.get("resource_spans")) or []
-    for rs in resource_spans:
-        if not isinstance(rs, dict):
+    no_content: list[tuple] = []
+    for index, raw in enumerate(payloads):
+        if not isinstance(raw, dict):
             continue
-        resource_attrs = _decode_attrs((rs.get("resource") or {}).get("attributes"))
-        scope_spans = (
-            rs.get("scopeSpans")
-            or rs.get("scope_spans")
-            or rs.get("instrumentationLibrarySpans")
-            or []
-        )
-        for ss in scope_spans:
-            if not isinstance(ss, dict):
+        prefix = f"{labels[index]}: " if labels is not None else ""
+        resource_spans = raw.get("resourceSpans", raw.get("resource_spans")) or []
+        for rs in resource_spans:
+            if not isinstance(rs, dict):
                 continue
-            scope_name = ((ss.get("scope") or {}).get("name")) or None
-            for span in ss.get("spans") or []:
-                if not isinstance(span, dict):
+            resource_attrs = _decode_attrs((rs.get("resource") or {}).get("attributes"))
+            scope_spans = (
+                rs.get("scopeSpans")
+                or rs.get("scope_spans")
+                or rs.get("instrumentationLibrarySpans")
+                or []
+            )
+            for ss in scope_spans:
+                if not isinstance(ss, dict):
                     continue
-                _convert_span(span, resource_attrs, scope_name, result)
+                scope_name = ((ss.get("scope") or {}).get("name")) or None
+                for span in ss.get("spans") or []:
+                    if not isinstance(span, dict):
+                        continue
+                    try:
+                        _convert_span(
+                            span, resource_attrs, scope_name, result, no_content, prefix
+                        )
+                    except Exception as exc:  # noqa: BLE001 - one bad span, not the batch
+                        name = span.get("name") if isinstance(span.get("name"), str) else "?"
+                        result.errors.append(
+                            f"{prefix}otel span {name!r}: could not be converted "
+                            f"({type(exc).__name__})."
+                        )
+    _merge_duplicates(result)
+    converted_ids = {
+        (record["metadata"]["otel"].get("trace_id"), record["metadata"]["otel"].get("response_id"))
+        for record in result.records
+    }
+    reported: set[tuple] = set()
+    for message, response_key, span_key in no_content:
+        if (response_key is not None and response_key in converted_ids) or (
+            span_key is not None and span_key in reported
+        ):
+            # A metadata-only copy of a call another span carried in full
+            # (e.g. the Claude SDK's own span inside a Traceloop span), or the
+            # same span delivered twice.
+            result.skipped_duplicate += 1
+            continue
+        if span_key is not None:
+            reported.add(span_key)
+        result.no_content += 1
+        result.errors.append(message)
+    if result.unsupported_openinference:
+        result.errors.append(f"{result.unsupported_openinference} {_OPENINFERENCE_HINT}")
     return result
+
+
+def _completeness(record: dict) -> tuple:
+    """Sort key: which of two copies of one call keeps more of the request."""
+    return (
+        bool(record.get("tools")),
+        bool(record.get("response_format")),
+        "captured_output" in record,
+        # The client span times what the application waited for, which is
+        # what candidate replays are compared against.
+        record["metadata"]["otel"].get("span_kind") == "client",
+        len(record.get("messages") or []),
+    )
+
+
+def _call_key(otel_meta: dict) -> tuple | None:
+    """What identifies one call within its trace: its response id (the copies
+    of one call traced twice share it), else its span identity (the same span
+    delivered twice, as OTLP's at-least-once delivery allows). Scoped to the
+    trace because response ids are not unique everywhere (local model servers
+    and mocks reuse them)."""
+    trace_id = otel_meta.get("trace_id")
+    if not trace_id:
+        return None
+    if otel_meta.get("response_id") is not None:
+        return ("response", trace_id, otel_meta["response_id"])
+    if otel_meta.get("span_id"):
+        return ("span", trace_id, otel_meta["span_id"])
+    return None
+
+
+def _merge_duplicates(result: OtlpConversionResult) -> None:
+    """Keep one record per call: the most complete copy."""
+    kept: list[dict] = []
+    position: dict[tuple, int] = {}
+    for record in result.records:
+        key = _call_key(record["metadata"]["otel"])
+        if key is None or key not in position:
+            if key is not None:
+                position[key] = len(kept)
+            kept.append(record)
+            continue
+        index = position[key]
+        current = kept[index]
+        winner, loser = (
+            (record, current)
+            if _completeness(record) > _completeness(current)
+            else (current, record)
+        )
+        loser_otel = loser["metadata"]["otel"]
+        merged_ids = list(winner["metadata"]["otel"].get("duplicate_span_ids") or [])
+        merged_ids.extend(loser_otel.get("duplicate_span_ids") or [])
+        if loser_otel.get("span_id"):
+            merged_ids.append(loser_otel["span_id"])
+        merged_ids = [
+            span_id
+            for i, span_id in enumerate(merged_ids)
+            if span_id != winner["metadata"]["otel"].get("span_id") and span_id not in merged_ids[:i]
+        ]
+        if merged_ids:
+            winner["metadata"]["otel"]["duplicate_span_ids"] = merged_ids
+        kept[index] = winner
+        result.skipped_duplicate += 1
+    result.records = kept
 
 
 # ---------- OTLP plumbing ----------
@@ -201,16 +361,33 @@ def _decode_attrs(attr_list: Any) -> dict[str, Any]:
     return out
 
 
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not valid JSON")
+
+
 def _maybe_json(value: Any) -> Any:
-    """Complex attributes may arrive as JSON strings on spans; decode if so."""
+    """Complex attributes may arrive as JSON strings on spans; decode if so.
+    Strict JSON only: NaN/Infinity (which Python's json writes by default)
+    leave the value as text."""
     if isinstance(value, str):
         stripped = value.strip()
         if stripped.startswith(("[", "{")):
             try:
-                return json.loads(stripped)
-            except json.JSONDecodeError:
+                return json.loads(stripped, parse_constant=_reject_constant)
+            except (ValueError, RecursionError):
                 return value
     return value
+
+
+def _id_text(value: Any) -> str | None:
+    """An identifier attribute as non-empty text, else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _span_time_iso(span: dict, *keys: str) -> tuple[str | None, int | None]:
@@ -221,9 +398,9 @@ def _span_time_iso(span: dict, *keys: str) -> tuple[str | None, int | None]:
             continue
         try:
             nanos = int(raw)
-        except (TypeError, ValueError):
+            dt = datetime.fromtimestamp(nanos / 1e9, tz=timezone.utc)
+        except (TypeError, ValueError, OverflowError, OSError):
             continue
-        dt = datetime.fromtimestamp(nanos / 1e9, tz=timezone.utc)
         return dt.isoformat(), nanos
     return None, None
 
@@ -349,12 +526,57 @@ def _tool_definitions_to_openai(defs: Any) -> list[dict] | None:
         function: dict = {"name": entry.get("name") or "tool"}
         if entry.get("description"):
             function["description"] = entry["description"]
-        function["parameters"] = entry.get("parameters") or {
-            "type": "object",
-            "properties": {},
-        }
+        # OpenAI-style definitions carry ``parameters``; Anthropic-style ones
+        # (e.g. Traceloop's Anthropic instrumentation) carry ``input_schema``.
+        schema: Any = None
+        for key in ("parameters", "input_schema", "inputSchema"):
+            schema = _maybe_json(entry.get(key))
+            if isinstance(schema, dict) and schema:
+                break
+        function["parameters"] = (
+            schema if isinstance(schema, dict) and schema else {"type": "object", "properties": {}}
+        )
         tools.append({"type": "function", "function": function})
     return tools or None
+
+
+def _structured_output_format(value: Any) -> dict | None:
+    """Traceloop's gen_ai.request.structured_output_schema → response_format.
+
+    Usually the bare JSON schema; a full ``json_schema`` wrapper (name,
+    schema, strict) is accepted too.
+    """
+    schema = _maybe_json(value)
+    if not isinstance(schema, dict) or not schema:
+        return None
+    if isinstance(schema.get("schema"), dict) and ("name" in schema or "strict" in schema):
+        wrapper = {
+            "name": schema.get("name") or _STRUCTURED_OUTPUT_NAME,
+            "schema": schema["schema"],
+        }
+        if isinstance(schema.get("strict"), bool):
+            wrapper["strict"] = schema["strict"]
+        return {"type": "json_schema", "json_schema": wrapper}
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": _STRUCTURED_OUTPUT_NAME, "schema": schema},
+    }
+
+
+def _span_kind(span: dict) -> str | None:
+    """OTLP span kind (an enum number, or its proto name) → lower-case name."""
+    kind = span.get("kind")
+    if isinstance(kind, str) and kind.isdigit():
+        kind = int(kind)
+    if isinstance(kind, int):
+        return _SPAN_KINDS.get(kind)
+    if isinstance(kind, str):
+        name = kind.upper()
+        if name.startswith("SPAN_KIND_"):
+            name = name[len("SPAN_KIND_") :]
+        name = name.lower()
+        return name if name in _SPAN_KINDS.values() else None
+    return None
 
 
 def _legacy_flat_messages(attrs: dict) -> tuple[list[dict], str | None, str | None]:
@@ -393,6 +615,8 @@ def _convert_span(
     resource_attrs: dict,
     scope_name: str | None,
     result: OtlpConversionResult,
+    no_content: list[tuple],
+    error_prefix: str = "",
 ) -> None:
     attrs = _decode_attrs(span.get("attributes"))
 
@@ -404,33 +628,57 @@ def _convert_span(
     merged = {**details_attrs, **attrs}  # span attributes win over the event
 
     operation = merged.get("gen_ai.operation.name")
+    if operation is not None and not isinstance(operation, str):
+        operation = str(operation)
     has_legacy_prompt = any(
         k.startswith("gen_ai.prompt.") and k[len("gen_ai.prompt.") :].split(".", 1)[0].isdigit()
         for k in merged
     )
+    request_type = merged.get("llm.request.type")
     is_genai = (
         operation is not None
         or has_legacy_prompt
         or "gen_ai.provider.name" in merged
         or "gen_ai.system" in merged
-        or "llm.request.type" in merged
+        or request_type is not None
     )
     if not is_genai:
-        result.skipped_non_genai += 1
+        if attrs.get("openinference.span.kind") == "LLM":
+            result.unsupported_openinference += 1
+        else:
+            result.skipped_non_genai += 1
         return
-    if operation is not None and operation not in INFERENCE_OPERATIONS:
+    span_name = span.get("name") or "?"
+    if operation is not None:
+        if operation not in INFERENCE_OPERATIONS:
+            result.skipped_non_inference += 1
+            return
+        if span_name in _STRUCTURAL_SPAN_NAMES:
+            result.skipped_non_inference += 1
+            return
+    elif not (
+        has_legacy_prompt
+        or "gen_ai.input.messages" in merged
+        or request_type in _LEGACY_INFERENCE_REQUEST_TYPES
+    ):
+        # Provider-tagged but no operation and no content: an auxiliary call
+        # (a file upload, one model attempt inside a Claude API request), not
+        # an inference call.
         result.skipped_non_inference += 1
         return
 
-    span_name = span.get("name") or "?"
     trace_id = span.get("traceId") or span.get("trace_id")
     span_id = span.get("spanId") or span.get("span_id")
+    parent_span_id = span.get("parentSpanId") or span.get("parent_span_id") or None
+    response_id = _id_text(merged.get("gen_ai.response.id"))
     label = f"otel span {span_name!r} (trace_id={trace_id or '?'}, span_id={span_id or '?'})"
 
     start_iso, start_ns = _span_time_iso(span, "startTimeUnixNano", "start_time_unix_nano")
     end_iso, end_ns = _span_time_iso(span, "endTimeUnixNano", "end_time_unix_nano")
     if start_iso is None:
-        result.errors.append(f"{label}: span has no start time; cannot derive the snapshot timestamp.")
+        result.errors.append(
+            f"{error_prefix}{label}: span has no start time; cannot derive the snapshot timestamp."
+        )
         return
 
     # --- input messages ---
@@ -455,9 +703,15 @@ def _convert_span(
         messages.insert(0, {"role": "system", "content": system_text})
 
     if not any(m.get("role") != "system" for m in messages):
-        result.errors.append(
-            f"{label}: GenAI span carries no message content (metadata-only telemetry). "
-            + _CONTENT_CAPTURE_HINT
+        # Decided after every span is seen: a copy of a call another span
+        # carried in full is dropped silently instead.
+        no_content.append(
+            (
+                f"{error_prefix}{label}: GenAI span carries no message content "
+                "(metadata-only telemetry). " + _CONTENT_CAPTURE_HINT,
+                (trace_id, response_id) if trace_id and response_id else None,
+                (trace_id, span_id) if trace_id and span_id else None,
+            )
         )
         return
 
@@ -565,10 +819,17 @@ def _convert_span(
     if tools:
         record["tools"] = tools
 
+    schema_attr = merged.get("gen_ai.request.structured_output_schema")
+    response_format = (
+        _structured_output_format(schema_attr) if schema_attr is not None else None
+    )
+    if response_format is not None:
+        record["response_format"] = response_format
+
     # --- enrichment gaps: detect, surface, never fabricate ---
     enrichment_needed: list[str] = []
     output_type = merged.get("gen_ai.output.type")
-    if output_type == "json":
+    if response_format is None and (output_type == "json" or schema_attr is not None):
         # The conventions cannot carry the response_format JSON schema; the
         # customer supplies it once per workflow to restore contract checks.
         enrichment_needed.append("response_format_schema")
@@ -577,10 +838,15 @@ def _convert_span(
         enrichment_needed.append("tool_definitions")
 
     # --- metadata ---
+    workflow_name = merged.get("traceloop.workflow.name")
+    entity_path = merged.get("traceloop.entity.path")
     otel_meta: dict[str, Any] = {"span_name": span_name}
     for value, key in (
         (trace_id, "trace_id"),
         (span_id, "span_id"),
+        (parent_span_id, "parent_span_id"),
+        (_span_kind(span), "span_kind"),
+        (response_id, "response_id"),
         (provider, "provider"),
         (operation, "operation"),
         (scope_name, "scope"),
@@ -588,9 +854,15 @@ def _convert_span(
         (merged.get("gen_ai.conversation.id"), "conversation_id"),
         (merged.get("gen_ai.prompt.name"), "prompt_name"),
         (merged.get("gen_ai.prompt.version"), "prompt_version"),
+        (workflow_name, "traceloop_workflow_name"),
+        (entity_path, "traceloop_entity_path"),
         (output_type, "output_type"),
         (merged.get("gen_ai.request.stream"), "stream"),
         (content_source, "content_source"),
+        (
+            "gen_ai.request.structured_output_schema" if response_format is not None else None,
+            "response_format_source",
+        ),
     ):
         if value is not None:
             otel_meta[key] = value
@@ -622,11 +894,15 @@ def _convert_span(
     metadata: dict[str, Any] = {"source_format": "otel_genai", "otel": otel_meta}
     if enrichment_needed:
         metadata["enrichment_needed"] = enrichment_needed
-    record["metadata"] = metadata
 
-    workflow_id = merged.get("gen_ai.prompt.name")
+    # Grouping: an explicit prompt name, else Traceloop's workflow; the
+    # Traceloop task path names the call site within it.
+    workflow_id = merged.get("gen_ai.prompt.name") or workflow_name
     if workflow_id:
-        record["workflow_id"] = workflow_id
+        record["workflow_id"] = str(workflow_id)
+        if entity_path:
+            metadata["call_name"] = str(entity_path)
+    record["metadata"] = metadata
     if captured_output is not None:
         record["captured_output"] = captured_output
 
