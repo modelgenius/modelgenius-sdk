@@ -73,7 +73,10 @@ class TestConverter:
         path.write_text(json.dumps(payload) + "\n" + json.dumps(payload) + "\n")
         result = convert_otlp_file(path)
         assert result.payloads == 2
-        assert result.converted == 12
+        # The same spans delivered twice (OTLP is at-least-once) convert once.
+        assert result.converted == 6
+        assert result.skipped_duplicate == 7  # 6 records + the metadata-only span
+        assert len(result.errors) == 1
 
     def test_non_otlp_input_raises(self, tmp_path):
         path = tmp_path / "native.json"
