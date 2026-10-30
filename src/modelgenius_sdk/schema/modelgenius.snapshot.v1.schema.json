@@ -175,6 +175,121 @@
       "title": "Message",
       "type": "object"
     },
+    "SnapshotReference": {
+      "anyOf": [
+        {
+          "properties": {
+            "output": {
+              "not": {
+                "enum": [
+                  null,
+                  "",
+                  [],
+                  {}
+                ]
+              }
+            }
+          },
+          "required": [
+            "output"
+          ]
+        },
+        {
+          "properties": {
+            "values": {
+              "minProperties": 1,
+              "type": "object"
+            }
+          },
+          "required": [
+            "values"
+          ]
+        }
+      ],
+      "description": "A known-correct answer for this request.\n\nOptional. Unlike `captured_output`, which is the response your current\nmodel produced, a reference is what the answer should be: a label or\ngrade a person assigned, or a vetted output. When a workflow's requests\ncarry references, ModelGenius adds the criterion \"Agrees with your\nreference answer\" and judges every model's output against it.\n\nGive the full answer as `output`, the values a correct answer must\ncontain as `values`, or both: at least one is required.",
+      "properties": {
+        "importance": {
+          "anyOf": [
+            {
+              "enum": [
+                "ranking",
+                "must_pass"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What agreement means for the verdict. \"ranking\" (the default) shows each model's agreement next to your current model's and ranks models by it, but never blocks a switch. \"must_pass\" makes agreement a must-pass criterion. It can also be set per workflow before a run.",
+          "title": "Importance"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How to compare an output with this reference, in your own words, for example \"labels are case-insensitive; billing and payments count as the same\".",
+          "title": "Notes"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The complete known-correct output: text, or the JSON object or list your response format describes.",
+          "title": "Output"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the reference came from, for example \"human labels\" or \"expert review\".",
+          "title": "Source"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only the values a correct output must contain, by field name, for example {\"category\": \"billing\", \"priority\": \"high\"}.",
+          "title": "Values"
+        }
+      },
+      "title": "SnapshotReference",
+      "type": "object"
+    },
     "TokenUsage": {
       "description": "Provider-reported token usage for a captured production response.",
       "properties": {
@@ -350,6 +465,18 @@
       ],
       "default": null,
       "title": "Reasoning Effort"
+    },
+    "reference": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SnapshotReference"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional known-correct answer for this request (see SnapshotReference)."
     },
     "response_format": {
       "anyOf": [

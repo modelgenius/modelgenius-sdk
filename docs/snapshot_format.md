@@ -244,6 +244,40 @@ and token usage.
 | `request_timestamp` | **required** | ISO-8601, when the provider request started. |
 | `response_timestamp` | **required** | ISO-8601, when the provider response completed. |
 
+## `reference`: a known-correct answer
+
+`reference` carries what the answer *should* be for this request: a label or
+grade a person assigned, or a vetted output. It is optional, and separate from
+`captured_output`, which is what your current model actually said. When a
+workflow's requests carry references, ModelGenius adds the criterion "Agrees
+with your reference answer" and judges every model's output against it, your
+current model's included, so you see how often each one agrees.
+
+Give the full answer as `output`, only the values a correct answer must contain
+as `values`, or both: at least one is required. Requests without a reference
+are simply not judged on agreement, so you can label a sample of your traffic.
+Like `captured_output`, `reference` works the same on Anthropic-shaped records.
+
+```json
+{
+  "timestamp": "2026-07-01T09:30:00Z",
+  "messages": [{"role": "user", "content": "I was charged twice this month."}],
+  "reference": {
+    "values": {"category": "billing"},
+    "notes": "labels are case-insensitive",
+    "source": "human labels"
+  }
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `output` | string \| object \| list \| null | The complete known-correct output: text, or the JSON object or list your response format describes. |
+| `values` | object \| null | Only the values a correct output must contain, by field name, e.g. `{"category": "billing", "priority": "high"}`. |
+| `notes` | string \| null | How to compare an output with this reference, in your own words. |
+| `importance` | `"ranking"` \| `"must_pass"` \| null | What agreement means for the verdict. `"ranking"` (the default) shows each model's agreement next to your current model's and ranks models by it, but never blocks a switch. `"must_pass"` makes agreement a must-pass criterion. It can also be set per workflow before a run. |
+| `source` | string \| null | Where the reference came from, e.g. `"human labels"` or `"expert review"`. |
+
 ## What each optional field unlocks
 
 | You provide | ModelGenius can then |
@@ -252,6 +286,7 @@ and token usage.
 | `captured_output.usage` + `cost_usd` | Compute an honest savings baseline from what production actually cost, instead of estimating from token counts and price sheets. |
 | `metadata.workflow_name` + `metadata.call_name`, or `workflow_id` | Group snapshots into workflows precisely. **Precedence:** `workflow_name` (+ `call_name`) wins; else `workflow_id`; else grouping is inferred by content clustering — see [Grouping precedence](#grouping-precedence). |
 | `tools` / `response_format` | Run deterministic contract checks (JSON parseability, schema conformance, required fields, type validity) against every candidate's outputs. |
+| `reference` | Judge every model's output against your known-correct answers: each model's agreement is shown next to your current model's and ranks the models, and with `importance: "must_pass"` it also decides whether a switch is safe. |
 | `model` | Identify the baseline automatically and anchor the cost/quality comparison. |
 | `temperature`, `max_tokens`, `reasoning_effort`, … | Replay under the same conditions production ran under — honest quality verdicts and cost projections. |
 

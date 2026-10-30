@@ -7,7 +7,8 @@ loader semantics:
 - OpenAI-shaped records are validated against the full canonical schema.
 - Anthropic-shaped records (Messages-API native) get structural checks, and
   their ``captured_output`` — which is ALWAYS canonical (OpenAI-flavored) shape —
-  is validated against the schema's ``$defs/CapturedOutput`` subschema.
+  is validated against the schema's ``$defs/CapturedOutput`` subschema; their
+  ``reference`` (format-independent) against ``$defs/SnapshotReference``.
 - A timestamp must be resolvable for every record: top-level ``timestamp``,
   else ``metadata.timestamp``, else ``metadata.request_timestamp``, else
   ``captured_output.request_timestamp``.
@@ -144,16 +145,24 @@ def _snapshot_validator() -> Draft202012Validator:
     return Draft202012Validator(_load_schema())
 
 
-@lru_cache(maxsize=1)
-def _captured_output_validator() -> Draft202012Validator:
+@lru_cache(maxsize=4)
+def _subschema_validator(name: str) -> Draft202012Validator:
     schema = _load_schema()
-    # Wrapper schema so "#/$defs/..." refs inside CapturedOutput still resolve.
+    # Wrapper schema so "#/$defs/..." refs inside the subschema still resolve.
     wrapper = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$ref": "#/$defs/CapturedOutput",
+        "$ref": f"#/$defs/{name}",
         "$defs": schema["$defs"],
     }
     return Draft202012Validator(wrapper)
+
+
+def _captured_output_validator() -> Draft202012Validator:
+    return _subschema_validator("CapturedOutput")
+
+
+def _reference_validator() -> Draft202012Validator:
+    return _subschema_validator("SnapshotReference")
 
 
 # ---------- format detection (mirrors modelgenius/ingestion/normalizer.py) ----------
@@ -469,6 +478,11 @@ def _validate_anthropic(record: dict, make: Callable[[str, str, str], Issue]) ->
     captured = record.get("captured_output")
     if captured is not None:
         out.extend(_schema_issues(_captured_output_validator(), captured, ["captured_output"], make))
+    # A known-correct answer is format-independent: the same rules as on a
+    # canonical record.
+    reference = record.get("reference")
+    if reference is not None:
+        out.extend(_schema_issues(_reference_validator(), reference, ["reference"], make))
     return out
 
 
