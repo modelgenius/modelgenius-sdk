@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modelgenius-sdk"
-version = "0.2.0"
+version = "0.3.0"
 description = "Capture LLM call/response snapshots and validate them against the ModelGenius snapshot format — locally, with no network calls."
 readme = "README.md"
 license = { file = "LICENSE" }
