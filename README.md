@@ -105,6 +105,7 @@ The more you capture, the more the analysis can do:
 | `usage` + `cost_usd` | Honest savings baseline from actual spend |
 | `workflow_name` + `call_name` (or `workflow_id`) | Precise workflow grouping instead of content-based inference |
 | `tools` / `response_format` | Deterministic output-contract checks on every candidate |
+| `reference` | Every model judged against your known-correct answers (see [docs](docs/snapshot_format.md#reference-a-known-correct-answer)) |
 | `model` | Automatic baseline identification |
 
 Full table with grouping precedence: [docs/snapshot_format.md](docs/snapshot_format.md#what-each-optional-field-unlocks).

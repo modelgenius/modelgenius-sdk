@@ -35,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Snapshots can carry an optional `reference`: a known-correct answer for the
+  request — the full answer as `output`, the values a correct answer must
+  contain as `values`, or both — with optional `notes`, `importance`
+  (`"ranking"` or `"must_pass"`) and `source`. ModelGenius judges every
+  model's output against it; see
+  [docs/snapshot_format.md](docs/snapshot_format.md#reference-a-known-correct-answer).
+  The schema and the local validator check it on both record shapes: at least
+  one of `output` or `values` is required.
+- `examples/reference.jsonl`.
 - Records use Traceloop's `traceloop.workflow.name` as `workflow_id` (when
   there is no `gen_ai.prompt.name`) and `traceloop.entity.path` as
   `metadata.call_name`, so calls group by workflow and task.
@@ -44,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `convert_otlp_payloads()` converts several payloads as one set of traces;
   `ConvertFileResult` / `OtlpConversionResult` count `skipped_duplicate`,
   `no_content` and `unsupported_openinference`.
+
+### Changed
+
+- `reference` is now a known top-level field. A record that used a top-level
+  `reference` key for something else (a ticket ID string, say) now fails
+  validation, as it does on upload: rename that key or move it under
+  `metadata`.
 
 ## [0.2.0] - 2026-07-09
 

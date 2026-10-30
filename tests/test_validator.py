@@ -640,3 +640,49 @@ def test_validate_path_strict_kwarg_accepted(tmp_path, strict):
     p.write_text(json.dumps(minimal_openai()))
     report = validate_path(p, strict=strict)
     assert report.records == 1
+
+
+# ---------- reference answers ----------
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        {"output": "billing"},
+        {"output": {"category": "billing"}},
+        {"values": {"category": "billing", "priority": "high"}, "importance": "must_pass"},
+        {"output": "billing", "notes": "case-insensitive", "source": "human labels", "importance": "ranking"},
+    ],
+)
+def test_a_reference_answer_is_accepted_on_either_shape(reference):
+    assert errors_of(validate_record(minimal_openai(reference=reference))) == []
+    record = anthropic_record()
+    record["reference"] = reference
+    assert errors_of(validate_record(record)) == []
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        {},
+        {"notes": "no answer given"},
+        {"output": ""},
+        {"values": {}},
+        {"output": "billing", "importance": "critical"},
+        "billing",
+    ],
+)
+def test_a_reference_without_an_answer_or_with_a_bad_importance_is_an_error(reference):
+    assert errors_of(validate_record(minimal_openai(reference=reference)))
+    record = anthropic_record()
+    record["reference"] = reference
+    assert errors_of(validate_record(record))
+
+
+def test_the_reference_example_file_validates_cleanly():
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "examples" / "reference.jsonl"
+    report = validate_path(path)
+    assert report.records == 2
+    assert report.errors == [], [str(i) for i in report.errors]
