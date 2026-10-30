@@ -496,7 +496,7 @@ class TestMisc:
         assert parsed.utcoffset() == timezone.utc.utcoffset(None)
 
     def test_lazy_exports(self):
-        assert modelgenius_sdk.__version__ == "0.2.0"
+        assert modelgenius_sdk.__version__ == "0.3.0"
         assert modelgenius_sdk.CaptureConfig is CaptureConfig
 
         import modelgenius_sdk.capture as capture_pkg
