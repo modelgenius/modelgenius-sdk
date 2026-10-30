@@ -16,7 +16,10 @@ What maps where (OTel → snapshot record):
     gen_ai.output.messages (first choice)     → captured_output.output_text/.tool_calls
     gen_ai.request.{temperature,top_p,...}    → first-class sampling params
     gen_ai.request.{seed,top_k}               → provider_params (captured, not auto-replayed)
-    gen_ai.usage.*                            → captured_output.usage
+    gen_ai.usage.*                            → captured_output.usage (cache read/write
+                                                counts → captured_output.provider_metadata)
+    finish reason (output message, else gen_ai.response.finish_reasons,
+      else anthropic.message.stop_reason)     → captured_output.provider_metadata.finish_reason
     span start/end times                      → timestamp, captured_output timestamps, latency_ms
     gen_ai.tool.definitions                   → tools (OpenAI function wrappers;
                                                 ``parameters`` or Anthropic ``input_schema``)
@@ -119,6 +122,8 @@ _CONSUMED_ATTRS = frozenset(
         "gen_ai.usage.reasoning.output_tokens",
         "gen_ai.usage.cache_read.input_tokens",
         "gen_ai.usage.cache_creation.input_tokens",
+        "gen_ai.usage.cache_write.input_tokens",
+        "anthropic.message.stop_reason",
         "gen_ai.conversation.id",
         "gen_ai.prompt.name",
         "gen_ai.prompt.version",
@@ -377,6 +382,15 @@ def _maybe_json(value: Any) -> Any:
             except (ValueError, RecursionError):
                 return value
     return value
+
+
+def _first_text(value: Any) -> str | None:
+    """A non-empty string, or the first item of a string array (also when
+    the array arrives JSON-encoded)."""
+    value = _maybe_json(value)
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    return value if isinstance(value, str) and value else None
 
 
 def _id_text(value: Any) -> str | None:
@@ -730,6 +744,12 @@ def _convert_span(
             output_tool_calls = converted_choice[0].get("tool_calls")
         if isinstance(first_choice, dict) and first_choice.get("finish_reason"):
             finish_reason = first_choice["finish_reason"]
+    if finish_reason is None:
+        # Claude spans (Console, the Claude SDK) carry the stop reason only
+        # under Anthropic's own attribute.
+        finish_reason = _first_text(merged.get("gen_ai.response.finish_reasons")) or _first_text(
+            merged.get("anthropic.message.stop_reason")
+        )
 
     usage: dict[str, int] = {}
     input_tokens = merged.get("gen_ai.usage.input_tokens", merged.get("gen_ai.usage.prompt_tokens"))
@@ -759,6 +779,8 @@ def _convert_span(
             ("gen_ai.response.finish_reasons", "finish_reasons"),
             ("gen_ai.response.time_to_first_chunk", "time_to_first_chunk"),
             ("gen_ai.usage.cache_read.input_tokens", "cache_read_input_tokens"),
+            # Claude Console's name for cache writes; the semconv name wins.
+            ("gen_ai.usage.cache_write.input_tokens", "cache_creation_input_tokens"),
             ("gen_ai.usage.cache_creation.input_tokens", "cache_creation_input_tokens"),
         ):
             if merged.get(source_key) is not None:

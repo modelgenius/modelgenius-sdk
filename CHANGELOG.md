@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Full content" mode.
 - `convert otlp`: a collector file export named `.json` (one payload per
   line) converts; a binary file gets a clear error.
+- `convert otlp`: Claude spans keep their stop reason (read from
+  `anthropic.message.stop_reason` when the output message and
+  `gen_ai.response.finish_reasons` carry none), and the Claude Console's
+  `gen_ai.usage.cache_write.input_tokens` is kept as
+  `cache_creation_input_tokens`.
 
 ### Added
 
